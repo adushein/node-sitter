@@ -1,0 +1,36 @@
+
+nodeDrainerEnabled: true
+containerdProxyEnabled: false
+containerdProxy: ""
+customCertsEnabled: true
+customCerts: ""
+customKubeletFlagsEnabled: true
+customKubeletFlags: "--image-gc-low-threshold=90  --image-gc-high-threshold=95"
+
+residentImage: "cr.yandex/yc/mk8s-openssl:stable"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext: {}
+
+resources: {}
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+nodeSelector: {}
+#  yandex.cloud/preemptible: "true"
+
+tolerationName: node-sitter
+
+tolerations: []
+
+affinity: {}

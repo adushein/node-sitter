@@ -1,0 +1,70 @@
+#!/bin/bash
+set -eo pipefail
+
+NODE_NAME=${NODE_NAME:-$(/usr/bin/hostname -s)}
+KUBECONFIG=${KUBECONFIG:-/etc/kubernetes/kubelet-kubeconfig.conf}
+KUBECTL=${KUBECTL:-"/home/kubernetes/bin/kubectl"}
+export KUBECONFIG
+CORDONED_FILE="/var/tmp/cordoned-by-node-drainer"
+
+### expects the list of pids of running processes and waits for them to finish
+waitall() {
+    local pids alive_pids timeout
+    pids="$1"
+    timeout=150 #approx 15 seconds
+    while [[ $timeout -gt 0 ]]; do
+        alive_pids=""
+        for pid in $pids; do
+            if /usr/bin/kill -0 "$pid" 2>/dev/null; then
+                alive_pids="$alive_pids $pid"
+            elif wait "$pid"; then
+                :
+            else
+                echo "Process $pid failed" >&2
+            fi
+        done
+        if [[ -z "$alive_pids" ]]; then
+            break
+        fi
+        pids="$alive_pids"
+        timeout=$(( timeout - 1 ))
+        sleep 0.1
+    done
+}
+
+### debuffs the previously set cordon status
+public_uncordon() {
+    if [[ -f "$CORDONED_FILE" ]]; then
+        $KUBECTL uncordon "$NODE_NAME" || /usr/bin/true
+        rm -f "$CORDONED_FILE"
+    fi
+}
+
+### sets cordon status to the node and removes node hosted pods except DaemonSets
+public_drain() {
+    local pod ns current_ns pod_list pids
+    $KUBECTL cordon "$NODE_NAME"
+    touch "$CORDONED_FILE"
+    while read ns pod; do
+        if [[ "$ns" != "$current_ns" ]]; then
+            if [[ -n "$pod_list" ]]; then
+                $KUBECTL -n "$current_ns" delete pods --force --grace-period=0 $pod_list &
+                pids="$pids $!"
+                /usr/bin/sleep 0.1
+            fi
+            current_ns="$ns"
+            pod_list="$pod"
+        else
+            pod_list="$pod_list $pod"
+        fi
+    done < <($KUBECTL get pods -A --field-selector spec.nodeName="$NODE_NAME" \
+        -o jsonpath='{range .items[?(@.metadata.ownerReferences[0].kind!="DaemonSet")]}{@.metadata.namespace}{" "}{@.metadata.name}{"\n"}{end}' \
+        | /usr/bin/sort)
+    if [[ -n "$current_ns" ]]; then
+        $KUBECTL -n "$current_ns" delete pods --force --grace-period=0 $pod_list &
+        pids="$pids $!"
+    fi
+    waitall "$pids"
+}
+
+for cmd in $@; do "public_$cmd"; done

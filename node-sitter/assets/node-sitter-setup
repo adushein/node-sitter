@@ -1,0 +1,142 @@
+DEBUG="1"
+[[ -z "$DEBUG" ]] || set -x
+
+set -eo pipefail
+
+NS_HOME=${NS_HOME:-/var/lib/node-sitter}
+
+write_file_if_changed() {
+    local filename content_env_var_name permissions orig_checksum new_checksum _dummy
+    filename="$1"
+    content_env_var="$2"
+    permissions="$3"
+    read new_checksum _dummy < <(cat <<< "${!content_env_var}" | /usr/bin/sha256sum)
+    if [[ -f "$filename" ]]; then
+        read orig_checksum _dummy < <(/usr/bin/sha256sum "$filename")
+    fi
+    if [[ "$orig_checksum" != "$new_checksum" ]]; then
+        cat <<< "${!content_env_var}" > "$filename"
+        if [[ -n "$permissions" ]]; then
+            /usr/bin/chmod "$permissions" "$filename"
+        fi
+        return 0
+    fi
+    return 1
+}
+
+install_node_drainer() {
+    write_file_if_changed /mnt/home/kubernetes/bin/node-drainer.sh NODE_DRAINER_SCRIPT +x || /usr/bin/true
+    write_file_if_changed "$NS_HOME/node-drainer.service" NODE_DRAINER_SERVICE || return 0
+    nsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash -e <<-EOF
+        [[ -z "$DEBUG" ]] || set -x
+        cp "$NS_HOME/node-drainer.service" /etc/systemd/system/node-drainer.service
+	/usr/bin/systemctl daemon-reload
+	/usr/bin/systemctl enable --now node-drainer.service
+	EOF
+}
+
+uninstall_node_drainer() {
+    [[ -f "$NS_HOME/node-drainer.service" ]] || return 0
+    nsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash <<-EOF
+        [[ -z "$DEBUG" ]] || set -x
+        rm -f /home/kubernetes/bin/node-drainer.sh /etc/systemd/system/node-drainer.service $NS_HOME/node-drainer.service
+	/usr/bin/systemctl disable --now node-drainer.service
+	/usr/bin/systemctl daemon-reload
+	EOF
+}
+
+install_containerd_proxy() {
+    local droplet_dir
+    droplet_dir="/etc/systemd/system/containerd.service.d"
+    PROXY_DROPLET_BODY=$(cat <<-EOF
+	[Service]
+	Environment="HTTP_PROXY=$CONTAINERD_PROXY"
+	Environment="HTTPS_PROXY=$CONTAINERD_PROXY"
+	EOF
+    )
+    write_file_if_changed "$NS_HOME/proxy.conf" PROXY_DROPLET_BODY || return 0
+    nsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash -e <<-EOF
+	[[ -z "$DEBUG" ]] || set -x
+	[[ -d "$droplet_dir" ]] || mkdir -p "$droplet_dir"
+	cp "$NS_HOME/proxy.conf" "$droplet_dir/proxy.conf"
+	/usr/bin/systemctl daemon-reload
+	/usr/bin/systemctl restart containerd
+	EOF
+}
+
+uninstall_containerd_proxy() {
+    local droplet_dir
+    droplet_dir="/etc/systemd/system/containerd.service.d"
+    [[ -f "$NS_HOME/proxy.conf" ]] || return 0
+    nsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash <<-EOF
+	[[ -z "$DEBUG" ]] || set -x
+	rm -f "$droplet_dir/proxy.conf" "$NS_HOME/proxy.conf"
+	/usr/bin/systemctl daemon-reload
+	/usr/bin/systemctl restart containerd
+	EOF
+}
+
+install_custom_certs() {
+    write_file_if_changed "$NS_HOME/custom-certs" CUSTOM_CERTS || return 0
+    mv "$NS_HOME/custom-certs" "$NS_HOME/custom-certs.new"
+    nsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash -e <<-EOF
+	[[ -z "$DEBUG" ]] || set -x
+	cd /usr/local/share/ca-certificates
+	/usr/bin/find ./ -type f -name custom-cert-\*.crt -delete
+	/usr/bin/csplit --digits=3  -s -z -f custom-cert- -b '%03d.crt' "$NS_HOME/custom-certs.new" '/-----BEGIN CERTIFICATE-----/' "{*}"
+	/usr/sbin/update-ca-certificates --fresh
+	/usr/bin/systemctl restart containerd
+	/usr/bin/systemctl restart docker
+	mv "$NS_HOME/custom-certs.new" "$NS_HOME/custom-certs"
+	EOF
+}
+
+uninstall_custom_certs() {
+    [[ -f "$NS_HOME/custom-certs" ]] || return 0
+    nsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash <<-EOF
+	[[ -z "$DEBUG" ]] || set -x
+	/usr/bin/find /usr/local/share/ca-certificates -type f -name custom-cert-\*.crt -delete
+	/usr/sbin/update-ca-certificates --fresh
+	/usr/bin/systemctl restart containerd
+	/usr/bin/systemctl restart docker
+	rm -f "$NS_HOME/custom-certs"
+	EOF
+}
+
+install_custom_kubelet_flags() {
+    write_file_if_changed "$NS_HOME/custom-kubelet-flags" CUSTOM_KUBELET_FLAGS || return 0
+    nsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash -e <<-EOF
+	[[ -z "$DEBUG" ]] || set -x
+	[[ -f "$NS_HOME/keep_kubelet_secondary_env" ]] || cp /etc/default/kubelet_secondary_env "$NS_HOME/keep_kubelet_secondary_env"
+	/usr/bin/sed -r -e "/^SECONDARY_KUBELET_OPTS=/ s/\"\$/ $CUSTOM_KUBELET_FLAGS\"/" "$NS_HOME/keep_kubelet_secondary_env" \
+            | tee /etc/default/kubelet_secondary_env
+	/usr/bin/systemctl restart kubelet
+	EOF
+}
+
+uninstall_custom_kubelet_flags() {
+    [[ -f "$NS_HOME/custom-kubelet-flags" ]] || return 0
+    nsenter --target 1 --mount --uts --ipc --net --pid -- /bin/bash <<-EOF
+	[[ -z "$DEBUG" ]] || set -x
+	[[ -f "$NS_HOME/keep_kubelet_secondary_env" ]] && mv "$NS_HOME/keep_kubelet_secondary_env" /etc/default/kubelet_secondary_env || /usr/bin/true
+	/usr/bin/systemctl restart kubelet
+	rm -f "$NS_HOME/custom-kubelet-flags"
+	EOF
+}
+
+untaint() {
+    local node_name kubectl taint
+    [[ -n "$TAINT_NAME" ]] || return 0
+    node_name=${NODE_NAME:-$(/usr/bin/hostname -s)}
+    kubectl=${KUBECTL:-"/mnt/home/kubernetes/bin/kubectl"}
+    while read taint; do
+        $kubectl taint node "$node_name" "${taint}-"
+    done < <($kubectl get node $node_name -o jsonpath="{range .spec.taints[?(@.key==\"$TAINT_NAME\")]}{@.key}{\"=\"}{@.value}{\":\"}{@.effect}{\"\\n\"}{end}")
+}
+    
+
+[[ -z "$NODE_DRAINER_ENABLED" ]] && uninstall_node_drainer || install_node_drainer
+[[ -z "$CONTAINERD_PROXY_ENABLED" ]] && uninstall_containerd_proxy || install_containerd_proxy
+[[ -z "$CUSTOM_CERTS_ENABLED" ]] && uninstall_custom_certs || install_custom_certs
+[[ -z "$CUSTOM_KUBELET_FLAGS_ENABLED" ]] && uninstall_custom_kubelet_flags || install_custom_kubelet_flags
+untaint

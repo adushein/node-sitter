@@ -1,0 +1,17 @@
+[Unit]
+Description=Pod draining service
+Requires=network.target
+DefaultDependencies=no
+Before=shutdown.target reboot.target
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+TimeoutStopSec=20
+ExecStart=/home/kubernetes/bin/node-drainer.sh uncordon
+ExecStop=/home/kubernetes/bin/node-drainer.sh drain
+
+[Install]
+WantedBy=multi-user.target

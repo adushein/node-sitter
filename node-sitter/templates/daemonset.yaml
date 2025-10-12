@@ -1,0 +1,234 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "node-sitter.fullname" . }}
+  labels:
+    {{- include "node-sitter.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "node-sitter.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "node-sitter.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      hostPID: true
+      hostIPC: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: {{ .Chart.Name }}-init
+          image: "{{ .Values.residentImage | default "cr.yandex/yc/mk8s-openssl:stable" }}"
+          imagePullPolicy: {{ .Values.residentImagePullPolicy | default "Never" }}
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: TAINT_NAME
+              value: "{{ .Values.tolerationName }}"
+            {{- if .Values.nodeDrainerEnabled }}
+            - name: NODE_DRAINER_ENABLED
+              value: "1"
+            - name: NODE_DRAINER_SCRIPT
+              value: |
+                {{- .Files.Get "assets/node-drainer.sh" | nindent 16 }}
+            - name: NODE_DRAINER_SERVICE
+              value: |
+                {{- .Files.Get "assets/node-drainer.service" | nindent 16 }}
+            {{- end }}
+            {{- if .Values.containerdProxyEnabled }}
+            - name: CONTAINERD_PROXY_ENABLED
+              value: "1"
+            - name: CONTAINERD_PROXY
+              value: "{{ .Values.containerdProxy }}"
+            {{- end }}
+            {{- if .Values.customCertsEnabled }}
+            - name: CUSTOM_CERTS_ENABLED
+              value: "1"
+            - name: CUSTOM_CERTS
+              value: |
+                {{- .Values.customCerts | nindent 16 }}
+            {{- end }}
+            {{- if .Values.customKubeletFlagsEnabled }}
+            - name: CUSTOM_KUBELET_FLAGS_ENABLED
+              value: "1"
+            - name: CUSTOM_KUBELET_FLAGS
+              value: "{{ .Values.customKubeletFlags }}"
+            {{- end }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              {{- .Files.Get "assets/node-sitter-setup" | nindent 14 }}
+          securityContext:
+            privileged: true
+          resources:
+            limits:
+              cpu: 100m
+              memory: 200Mi
+          volumeMounts:
+            - name: var-lib-node-sitter
+              mountPath: /var/lib/node-sitter
+            - name: home-kubernetes-bin
+              mountPath: /mnt/home/kubernetes/bin
+      containers:
+        - name: {{ .Chart.Name }}-sleep
+          securityContext: 
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            privileged: false
+          image: "{{ .Values.residentImage | default "cr.yandex/yc/mk8s-openssl:stable" }}"
+          imagePullPolicy: {{ .Values.residentImagePullPolicy | default "Never" }}
+          command: [ "/usr/bin/sleep", "inf" ]
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: var-lib-node-sitter
+          hostPath:
+            path: /var/lib/node-sitter
+            type: DirectoryOrCreate
+        - name: home-kubernetes-bin
+          hostPath:
+            path: /home/kubernetes/bin
+            type: Directory
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      tolerations:
+        - key: "{{ .Values.tolerationName }}"
+          operator: "Exists"
+      {{- with .Values.tolerations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "node-sitter.serviceAccountName" . }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "node-sitter.fullname" . }}-cleaner
+  labels:
+    {{- include "node-sitter.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": "post-delete"
+    "helm.sh/resource-policy": keep
+    "helm.sh/hook-weight": "-5"
+spec:
+  selector:
+    matchLabels:
+      {{- include "node-sitter.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "node-sitter.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      hostPID: true
+      hostIPC: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: {{ .Chart.Name }}-init
+          image: "{{ .Values.residentImage | default "cr.yandex/yc/mk8s-openssl:stable" }}"
+          imagePullPolicy: {{ .Values.residentImagePullPolicy | default "Never" }}
+          env: 
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          command:
+            - /bin/bash
+            - -c
+            - |
+              {{- .Files.Get "assets/node-sitter-setup" | nindent 14 }}
+          securityContext:
+            privileged: true
+          resources:
+            limits:
+              cpu: 100m
+              memory: 200Mi
+          volumeMounts:
+            - name: var-lib-node-sitter
+              mountPath: /var/lib/node-sitter
+            - name: home-kubernetes-bin
+              mountPath: /mnt/home/kubernetes/bin
+      containers:
+        - name: {{ .Chart.Name }}-sleep
+          securityContext: 
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            privileged: false
+          image: "{{ .Values.residentImage | default "cr.yandex/yc/mk8s-openssl:stable" }}"
+          imagePullPolicy: {{ .Values.residentImagePullPolicy | default "Never" }}
+          command: [ "/usr/bin/sleep", "inf" ]
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: var-lib-node-sitter
+          hostPath:
+            path: /var/lib/node-sitter
+            type: DirectoryOrCreate
+        - name: home-kubernetes-bin
+          hostPath:
+            path: /home/kubernetes/bin
+            type: Directory
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      tolerations:
+        - key: "{{ .Values.tolerationName }}"
+          operator: "Exists"
+      {{- with .Values.tolerations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+

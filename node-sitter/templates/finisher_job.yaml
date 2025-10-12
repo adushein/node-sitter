@@ -1,0 +1,113 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "node-sitter.fullname" . }}-finisher
+  labels:
+    {{- include "node-sitter.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-delete
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: hook-succeeded,hook-failed
+spec:
+  activeDeadlineSeconds: {{ .Values.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: 120
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "node-sitter.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "node-sitter.serviceAccountName" . }}-finisher
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: node-sitter-finisher
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.residentImage | default "cr.yandex/yc/mk8s-openssl:stable" }}"
+          imagePullPolicy: {{ .Values.residentImagePullPolicy | default "Never" }}
+          command:
+          command:
+            - /bin/bash
+            - -c
+            - |
+              {{- .Files.Get "assets/node-sitter-finisher" | nindent 14 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            - name: DAEMONSET_NAME
+              value: "{{ include "node-sitter.fullname" . }}-cleaner"
+          volumeMounts:
+            - name: home-kubernetes-bin
+              mountPath: /mnt/home/kubernetes/bin
+      volumes:
+        - name: home-kubernetes-bin
+          hostPath:
+            path: /home/kubernetes/bin
+            type: Directory
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "node-sitter.serviceAccountName" . }}-finisher
+  labels:
+    {{- include "node-sitter.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-delete
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: hook-succeeded,hook-failed
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "node-sitter.serviceAccountName" . }}-finisher
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: post-delete
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: hook-succeeded,hook-failed
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "node-sitter.serviceAccountName" . }}-finisher
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "node-sitter.serviceAccountName" . }}-finisher
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "node-sitter.serviceAccountName" . }}-finisher
+  annotations:
+    helm.sh/hook: post-delete
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: hook-succeeded,hook-failed
+rules:
+  - apiGroups: ["apps"]
+    resources:
+      - daemonsets
+    verbs:
+      - get
+      - delete
