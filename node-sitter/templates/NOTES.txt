@@ -1,1 +1,5 @@
-1. Node-sitter DaemonSet deployed:
+node-sitter DaemonSet deployed:
+{{ if .Values.nodeDrainerEnabled }}[+]{{ else }}[-]{{ end }}  node drainer 
+{{ if .Values.containerdProxyEnabled }}[+]{{ else }}[-]{{ end }}  containerd proxy
+{{ if .Values.customCertsEnabled }}[+]{{ else }}[-]{{ end }}  custom certificate authority trust
+{{ if .Values.customKubeletFlagsEnabled }}[+]{{ else }}[-]{{ end }}  custom kubelet flags

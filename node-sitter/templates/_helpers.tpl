@@ -54,9 +54,5 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 Create the name of the service account to use
 */}}
 {{- define "node-sitter.serviceAccountName" -}}
-{{- if .Values.serviceAccount.create }}
-{{- default (include "node-sitter.fullname" .) .Values.serviceAccount.name }}
-{{- else }}
-{{- default "default" .Values.serviceAccount.name }}
-{{- end }}
+{{- include "node-sitter.fullname" . }}
 {{- end }}

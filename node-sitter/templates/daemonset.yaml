@@ -122,12 +122,16 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       tolerations:
+      {{- if .Values.tolerationName -}}
         - key: "{{ .Values.tolerationName }}"
           operator: "Exists"
+      {{- end }}
       {{- with .Values.tolerations }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.tolerationName -}}
       serviceAccountName: {{ include "node-sitter.serviceAccountName" . }}
+      {{- end }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet

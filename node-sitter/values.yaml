@@ -2,10 +2,10 @@
 nodeDrainerEnabled: true
 containerdProxyEnabled: false
 containerdProxy: ""
-customCertsEnabled: true
+customCertsEnabled: false
 customCerts: ""
-customKubeletFlagsEnabled: true
-customKubeletFlags: "--image-gc-low-threshold=90  --image-gc-high-threshold=95"
+customKubeletFlagsEnabled: false
+customKubeletFlags: "--image-gc-low-threshold=90 --image-gc-high-threshold=95"
 
 residentImage: "cr.yandex/yc/mk8s-openssl:stable"
 
@@ -20,16 +20,10 @@ podSecurityContext: {}
 
 resources: {}
 
-serviceAccount:
-  create: true
-  automount: true
-  annotations: {}
-  name: ""
-
 nodeSelector: {}
 #  yandex.cloud/preemptible: "true"
 
-tolerationName: node-sitter
+#tolerationName: node-sitter
 
 tolerations: []
 
