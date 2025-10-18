@@ -51,20 +51,20 @@ spec:
               value: |
                 {{- .Files.Get "assets/node-drainer.service" | nindent 16 }}
             {{- end }}
-            {{- if .Values.containerdProxyEnabled }}
+            {{- if .Values.containerdProxy }}
             - name: CONTAINERD_PROXY_ENABLED
               value: "1"
             - name: CONTAINERD_PROXY
               value: "{{ .Values.containerdProxy }}"
             {{- end }}
-            {{- if .Values.customCertsEnabled }}
+            {{- if .Values.customCerts }}
             - name: CUSTOM_CERTS_ENABLED
               value: "1"
             - name: CUSTOM_CERTS
               value: |
                 {{- .Values.customCerts | nindent 16 }}
             {{- end }}
-            {{- if .Values.customKubeletFlagsEnabled }}
+            {{- if .Values.customKubeletFlags }}
             - name: CUSTOM_KUBELET_FLAGS_ENABLED
               value: "1"
             - name: CUSTOM_KUBELET_FLAGS

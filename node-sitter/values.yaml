@@ -1,11 +1,9 @@
 
 nodeDrainerEnabled: true
-containerdProxyEnabled: false
 containerdProxy: ""
-customCertsEnabled: false
 customCerts: ""
-customKubeletFlagsEnabled: false
-customKubeletFlags: "--image-gc-low-threshold=90 --image-gc-high-threshold=95"
+customKubeletFlags: ""
+#customKubeletFlags: "--image-gc-low-threshold=90 --image-gc-high-threshold=95"
 
 residentImage: "cr.yandex/yc/mk8s-openssl:stable"
 
