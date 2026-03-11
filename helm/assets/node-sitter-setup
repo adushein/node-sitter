@@ -9,12 +9,12 @@ write_file_if_changed() {
     filename="$1"
     content_env_var="$2"
     permissions="$3"
-    read new_checksum _dummy < <(/usr/bin/cat <<< "${!content_env_var}" | /usr/bin/sha256sum)
+    read new_checksum _dummy < <(/usr/bin/sha256sum <<< "${!content_env_var}")
     if [[ -f "$filename" ]]; then
         read orig_checksum _dummy < <(/usr/bin/sha256sum "$filename")
     fi
     if [[ "$orig_checksum" != "$new_checksum" ]]; then
-        /usr/bin/cat <<< "${!content_env_var}" > "$filename"
+        echo -n "${!content_env_var}" > "$filename"
         if [[ -n "$permissions" ]]; then
             /usr/bin/chmod "$permissions" "$filename"
         fi
