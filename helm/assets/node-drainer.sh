@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x
 set -eo pipefail
 
 NODE_NAME=${NODE_NAME:-$(/usr/bin/hostname -s)}
@@ -9,10 +10,11 @@ CORDONED_FILE="/var/tmp/cordoned-by-node-drainer"
 
 ### expects the list of pids of running processes and waits for them to finish
 waitall() {
-    local pids alive_pids timeout
+    local pids alive_pids timeout finish_time
     pids="$1"
-    timeout=150 #approx 15 seconds
-    while [[ $timeout -gt 0 ]]; do
+    timeout=${2:-15}
+    finish_time=$(( EPOCHSECONDS + timeout ))
+    while [[ $EPOCHSECONDS -le $finish_time ]]; do
         alive_pids=""
         for pid in $pids; do
             if /usr/bin/kill -0 "$pid" 2>/dev/null; then
@@ -27,7 +29,6 @@ waitall() {
             break
         fi
         pids="$alive_pids"
-        timeout=$(( timeout - 1 ))
         sleep 0.1
     done
 }
@@ -43,7 +44,7 @@ public_uncordon() {
 ### sets cordon status to the node and removes node hosted pods except DaemonSets
 public_drain() {
     local pod ns current_ns pod_list pids
-    $KUBECTL cordon "$NODE_NAME"
+    $KUBECTL cordon "$NODE_NAME" || echo "Failed to cordon node, continue anyway" >&2
     touch "$CORDONED_FILE"
     while read ns pod; do
         if [[ "$ns" != "$current_ns" ]]; then
