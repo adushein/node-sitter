@@ -1,6 +1,16 @@
-set -x
+[[ -z "$DEBUG" ]] || set -x
 set -eo pipefail
+
+TIMEOUT=120
 
 KUBECTL=${KUBECTL:-"/mnt/home/kubernetes/bin/kubectl"}
 $KUBECTL get daemonset $DAEMONSET_NAME -o yaml
+
+STARTTS=$EPOCHSECONDS
+while [[ $(( EPOCHSECONDS - STARTTS )) -lt $TIMEOUT ]] ; do
+    if [[ -z "$($KUBECTL get daemonset $DAEMONSET_NAME -o jsonpath='{.status.numberUnavailable}')" ]]; then 
+        break
+    fi
+    /usr/bin/sleep 1
+done
 $KUBECTL delete daemonset $DAEMONSET_NAME

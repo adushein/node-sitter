@@ -34,17 +34,25 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.residentImage | default "cr.yandex/yc/mk8s-openssl:stable" }}"
           imagePullPolicy: {{ .Values.residentImagePullPolicy | default "Never" }}
-          command:
+          env:
+            - name: DEBUG
+            {{- if .Values.debug }}
+              value: "1"
+            {{- end }}
+            - name: DAEMONSET_NAME
+              value: "{{ include "node-sitter.fullname" . }}-cleaner"
           command:
             - /bin/bash
             - -c
             - |
               {{- .Files.Get "assets/node-sitter-finisher" | nindent 14 }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
-          env:
-            - name: DAEMONSET_NAME
-              value: "{{ include "node-sitter.fullname" . }}-cleaner"
+            limits:
+              cpu: 200m
+              memory: 200Mi
+            requests:
+              cpu: "0"
+              memory: "0"
           volumeMounts:
             - name: home-kubernetes-bin
               mountPath: /mnt/home/kubernetes/bin

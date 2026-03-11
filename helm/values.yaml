@@ -1,9 +1,11 @@
 
 nodeDrainerEnabled: true
 containerdProxy: ""
+containerdNoProxy: ""
 customCerts: ""
 customKubeletFlags: ""
 #customKubeletFlags: "--image-gc-low-threshold=90 --image-gc-high-threshold=95"
+debug: false
 
 residentImage: "cr.yandex/yc/mk8s-openssl:stable"
 
@@ -21,6 +23,7 @@ resources: {}
 nodeSelector: {}
 #  yandex.cloud/preemptible: "true"
 
+tolerationName: ""
 #tolerationName: node-sitter
 
 tolerations: []
