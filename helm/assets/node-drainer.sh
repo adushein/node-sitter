@@ -6,7 +6,7 @@ NODE_NAME=${NODE_NAME:-$(/usr/bin/hostname -s)}
 KUBECONFIG=${KUBECONFIG:-/etc/kubernetes/kubelet-kubeconfig.conf}
 KUBECTL=${KUBECTL:-"/home/kubernetes/bin/kubectl"}
 export KUBECONFIG
-CORDONED_FILE="/var/tmp/cordoned-by-node-drainer"
+CORDONED_FILE="/var/lib/node-sitter/cordoned-by-node-drainer"
 
 ### expects the list of pids of running processes and waits for them to finish
 waitall() {
@@ -35,10 +35,23 @@ waitall() {
 
 ### debuffs the previously set cordon status
 public_uncordon() {
+    local finish_time
     if [[ -f "$CORDONED_FILE" ]]; then
-        $KUBECTL uncordon "$NODE_NAME" || /usr/bin/true
-        rm -f "$CORDONED_FILE"
+        echo "The cordon lock file found, proceeding node uncordon" >&2
+    else
+        return 0
     fi
+    finish_time=$(( EPOCHSECONDS + 300 ))
+    while [[ $EPOCHSECONDS -le $finish_time ]]; do
+        if $KUBECTL uncordon "$NODE_NAME"; then
+            rm -f "$CORDONED_FILE"
+            return 0
+        fi
+        echo "Node uncordon failed, next attempt after 10s" >&2
+        sleep 10
+    done
+    echo "Give up with node uncordon" >&2
+    return 1
 }
 
 ### sets cordon status to the node and removes node hosted pods except DaemonSets
