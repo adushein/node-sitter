@@ -6,7 +6,6 @@ NODE_NAME=${NODE_NAME:-$(/usr/bin/hostname -s)}
 KUBECONFIG=${KUBECONFIG:-/etc/kubernetes/kubelet-kubeconfig.conf}
 KUBECTL=${KUBECTL:-"/home/kubernetes/bin/kubectl"}
 export KUBECONFIG
-CORDONED_FILE="/var/lib/node-sitter/cordoned-by-node-drainer"
 
 ### expects the list of pids of running processes and waits for them to finish
 waitall() {
@@ -35,30 +34,21 @@ waitall() {
 
 ### debuffs the previously set cordon status
 public_uncordon() {
-    local finish_time
-    if [[ -f "$CORDONED_FILE" ]]; then
-        echo "The cordon lock file found, proceeding node uncordon" >&2
-    else
+    local cordoned
+    cordoned=$($KUBECTL get nodes "$NODE_NAME" -o jsonpath='{@.metadata.labels.yandex\.cloud/node-drainer}')
+    if [[ -z "$cordoned" ]]; then
         return 0
     fi
-    finish_time=$(( EPOCHSECONDS + 300 ))
-    while [[ $EPOCHSECONDS -le $finish_time ]]; do
-        if $KUBECTL uncordon "$NODE_NAME"; then
-            rm -f "$CORDONED_FILE"
-            return 0
-        fi
-        echo "Node uncordon failed, next attempt after 10s" >&2
-        sleep 10
-    done
-    echo "Give up with node uncordon" >&2
-    return 1
+    echo "The node-drainer cordon label found, proceeding node uncordon" >&2
+    $KUBECTL uncordon "$NODE_NAME"
+    $KUBECTL label nodes "$NODE_NAME" yandex.cloud/node-drainer-
 }
 
 ### sets cordon status to the node and removes node hosted pods except DaemonSets
 public_drain() {
     local pod ns current_ns pod_list pids
-    $KUBECTL cordon "$NODE_NAME" || echo "Failed to cordon node, continue anyway" >&2
-    touch "$CORDONED_FILE"
+    $KUBECTL label nodes "$NODE_NAME" yandex.cloud/node-drainer=$EPOCHSECONDS \
+        && $KUBECTL cordon "$NODE_NAME" || echo "Failed to cordon node, continue anyway" >&2
     while read ns pod; do
         if [[ "$ns" != "$current_ns" ]]; then
             if [[ -n "$pod_list" ]]; then

@@ -8,6 +8,8 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+Restart=on-failure
+RestartSec=30
 RemainAfterExit=true
 TimeoutStopSec=20
 ExecStart=/home/kubernetes/bin/node-drainer.sh uncordon
